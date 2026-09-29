@@ -6571,6 +6571,19 @@ local FarmMethodToggles = {
 	Tyrant = "Auto Farm Tyrant of the Skies",
 }
 
+local AutoQuestSpecialControl
+local AutoQuestSpecialSyncing = false
+
+local function SetAutoQuestSpecialState(enabled)
+	enabled = enabled and true or false
+	SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", enabled)
+	if AutoQuestSpecialControl and AutoQuestSpecialControl.SetValue and not AutoQuestSpecialSyncing then
+		AutoQuestSpecialSyncing = true
+		pcall(function() AutoQuestSpecialControl:SetValue(enabled) end)
+		AutoQuestSpecialSyncing = false
+	end
+end
+
 local function GetSelectedFarmMethod()
 	if Settings[FarmMethodToggles.Tyrant] then
 		return "Farm Tyrant of the Skies"
@@ -6593,11 +6606,10 @@ local function SetFarmMethodState(methodKey, enabled)
 	local method = GetSelectedFarmMethod()
 	if method then
 		SaveSettings("Select Method Farm", method)
-		-- Auto Quest é o único responsável por buscar/renovar as quests
-		-- especiais. O Farm apenas usa a quest que já estiver ativa.
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
+		-- Auto Quest é o único responsável por buscar/renovar as quests.
+		SetAutoQuestSpecialState(true)
 	else
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
+		SetAutoQuestSpecialState(false)
 	end
 end
 
@@ -6641,8 +6653,18 @@ SettingAutoFarmSection.CreateToggle(
 		SaveSettings("Hop Find Katakuri", o)
 	end
 )
-SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest: Automatic Quest" })
-local o = SettingAutoFarmSection.CreateLabel({ Title = "Quest activates automatically when a Farm method is enabled." })
+AutoQuestSpecialControl = SettingAutoFarmSection.CreateToggle(
+	{
+		Title = "Auto Quest: Automatic Quest",
+		Desc = "Automatically gets the active Farm quest.",
+		Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false,
+	},
+	function(V)
+		if not AutoQuestSpecialSyncing then
+			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
+		end
+	end
+)
 MasteryFarmSection = FarmMain.CreateSection("Mastery Farm")
 MasteryFarmSection.CreateDropdown(
 	{
@@ -6968,8 +6990,8 @@ function QuestBoneAndkatakuri(V, H)
 	end
 	if (B.Position - C.Position).Magnitude <= 8 then
 		if J.Health > 0 then
-			-- A missão é confirmada pela interface antes de desativar o Auto Quest.
-			CommF:InvokeServer("StartQuest", V, H)
+			-- O Auto Quest só é desligado depois que o servidor realmente aceita a missão.
+			local response = CommF:InvokeServer("StartQuest", V, H)
 			local accepted = false
 			for _ = 1, 10 do
 				task.wait(0.1)
@@ -6979,9 +7001,9 @@ function QuestBoneAndkatakuri(V, H)
 					break
 				end
 			end
-			if accepted then
-				-- A missão foi confirmada; somente o Auto Quest é desativado enquanto o Farm trabalha.
-				SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
+			if accepted or response == 0 or response == true then
+				-- Atualiza a própria Toggle da UI; não é apenas uma mudança em Settings.
+				SetAutoQuestSpecialState(false)
 			end
 		end
 	else
@@ -7606,18 +7628,18 @@ local function AutoQuestSpecialFarmController()
 	-- Auto Quest is the only system allowed to acquire/renew the special quests.
 	-- Farm methods only consume the active quest target.
 	if not AnyFarmMethodEnabled() then
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
+		SetAutoQuestSpecialState(false)
 		return
 	end
 	local questGui = t.PlayerGui.Main:FindFirstChild("Quest")
 	local questVisible = questGui and questGui.Visible
 	if questVisible then
 		-- Quest already accepted: Auto Quest stays off while the Farm works.
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
+		SetAutoQuestSpecialState(false)
 		return
 	end
 	-- No active quest: re-enable Auto Quest and let this controller obtain it.
-	SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
+	SetAutoQuestSpecialState(true)
 	local method = GetSelectedFarmMethod()
 	if not method then
 		return
