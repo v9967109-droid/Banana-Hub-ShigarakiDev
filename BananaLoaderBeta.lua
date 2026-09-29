@@ -6593,9 +6593,11 @@ local function SetFarmMethodState(methodKey, enabled)
 	local method = GetSelectedFarmMethod()
 	if method then
 		SaveSettings("Select Method Farm", method)
-		SaveSettings("Start Farm", true)
+		-- Quest automática é controlada pelo ciclo da missão; Start Farm é
+		-- reservado exclusivamente para o Farm Mastery no Haunted Castle.
+		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
 	else
-		SaveSettings("Start Farm", false)
+		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
 	end
 end
 
@@ -6639,17 +6641,8 @@ SettingAutoFarmSection.CreateToggle(
 		SaveSettings("Hop Find Katakuri", o)
 	end
 )
-SettingAutoFarmSection.CreateToggle(
-	{
-		Title = "Auto Quest [Katakuri/Bone/Tyrant]",
-		Desc = nil,
-		Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false,
-	},
-	function(o)
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", o)
-	end
-)
-local o = SettingAutoFarmSection.CreateLabel({ Title = "Accepts automated missions according to Method Farm." })
+SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest: Automatic Quest" })
+local o = SettingAutoFarmSection.CreateLabel({ Title = "Quest activates automatically when a Farm method is enabled." })
 MasteryFarmSection = FarmMain.CreateSection("Mastery Farm")
 MasteryFarmSection.CreateDropdown(
 	{
@@ -6670,12 +6663,15 @@ MasteryFarmSection.CreateSlider(
 	end
 )
 MasteryFarmSection.CreateToggle(
-	{ Title = "Farm Mastery", Desc = nil, Default = Settings["Farm Mastery"] or false },
+	{ Title = "Farm Mastery", Desc = "Prepares the selected mastery for farming.", Default = Settings["Farm Mastery"] or false },
 	function(V)
 		SaveSettings("Farm Mastery", V)
-		if V and not Settings["Start Farm"] then
-			A.CreateNoti({ Title = "Banana Cat Hub", Desc = "Turn On Start Farm Plz", ShowTime = 5 })
-		end
+	end
+)
+MasteryFarmSection.CreateToggle(
+	{ Title = "Start Farm", Desc = "Farm mastery at Haunted Castle while Farm Mastery is enabled.", Default = Settings["Start Farm"] or false },
+	function(V)
+		SaveSettings("Start Farm", V)
 	end
 )
 FarmingMaterialSection = FarmMain.CreateSection("Farming Material")
@@ -7377,15 +7373,13 @@ local function IsActiveFarmQuestComplete()
 end
 
 function FarmMethod()
-	-- O método agora vem diretamente dos toggles individuais.
+	-- O método vem diretamente dos toggles individuais. Start Farm não
+	-- controla mais o farm normal: ele é exclusivo do Farm Mastery.
 	local SelectedFarmMethod = GetSelectedFarmMethod()
-	if SelectedFarmMethod then
-		Settings["Select Method Farm"] = SelectedFarmMethod
-		Settings["Start Farm"] = true
-	else
-		Settings["Start Farm"] = false
+	if not SelectedFarmMethod then
 		return
 	end
+	Settings["Select Method Farm"] = SelectedFarmMethod
 	local f, V, H = SelectedFarmMethod
 	local C, J = 9999, 2
 	if f == "Farm Katakuri" then
@@ -7415,6 +7409,14 @@ function FarmMethod()
 	-- Aguarda a interface da quest fechar e o próximo ciclo assume a nova quest.
 	if QuestVisible and IsActiveFarmQuestComplete() then
 		return
+	end
+	-- Auto Quest liga sozinho quando o método especial está ativo.
+	-- Assim que a missão aparece, ele se desliga até a missão ser concluída.
+	if Settings["Auto Quest [Katakuri/Bone/Tyrant]"] and QuestVisible then
+		Settings["Auto Quest [Katakuri/Bone/Tyrant]"] = false
+	end
+	if not QuestVisible then
+		Settings["Auto Quest [Katakuri/Bone/Tyrant]"] = true
 	end
 	if
 		Settings["Auto Quest [Katakuri/Bone/Tyrant]"]
@@ -7457,7 +7459,7 @@ function FarmMethod()
 					end
 					UsedualFlock()
 					ClickM1(V)
-				until not IsMobAlive(V) or not Settings["Start Farm"] or not StackFarm
+				until not IsMobAlive(V) or not AnyFarmMethodEnabled() or not StackFarm
 				return
 			else
 				local V = workspace:FindFirstChild("Map", true)
@@ -7531,7 +7533,7 @@ function FarmMethod()
 					end
 					UsedualFlock()
 					ClickM1(V)
-				until not IsMobAlive(V) or not Settings["Start Farm"] or not StackFarm
+				until not IsMobAlive(V) or not AnyFarmMethodEnabled() or not StackFarm
 				return
 			else
 				spawn(function()
@@ -7557,7 +7559,7 @@ function FarmMethod()
 						toTarget(H.CFrame * CFrame.new(0, 60, 0))
 					until (H.Position - t.Character.HumanoidRootPart.Position).Magnitude <= 100
 						or (DetectMob(f))
-						or not Settings["Start Farm"]
+						or not AnyFarmMethodEnabled()
 						or not StackFarm
 					wait(1)
 				end
@@ -7570,7 +7572,7 @@ function FarmMethod()
 						toTarget(Y.CFrame * CFrame.new(0, 60, 0))
 					until (Y.Position - t.Character.HumanoidRootPart.Position).Magnitude <= 100
 						or (DetectMob(f))
-						or not Settings["Start Farm"]
+						or not AnyFarmMethodEnabled()
 						or not StackFarm
 					wait(1)
 				else
@@ -7594,18 +7596,46 @@ function FarmMethod()
 				else
 					toTarget(V.HumanoidRootPart.CFrame * CFrame.new(7, 20, 0))
 				end
-			until not IsMobAlive(V) or not Settings["Start Farm"] or not StackFarm
+			until not IsMobAlive(V) or not AnyFarmMethodEnabled() or not StackFarm
 			if getgenv().QuestTrainer and getgenv().QuestTrainer.CountKillMob then
 				getgenv().QuestTrainer.CountKillMob = getgenv().QuestTrainer.CountKillMob + 1
 			end
 		end
 	end
 end
+local function HauntedCastleMasteryFarm()
+	if not Settings["Farm Mastery"] or not Settings["Start Farm"] then
+		return
+	end
+	local targetNames = {
+		"Reborn Skeleton",
+		"Demonic Soul",
+		"Living Zombie",
+		"Possessed Mummy",
+	}
+	local target = DetectMob(targetNames)
+	if not target then
+		local spawnPart = DetectPartSpawnMob(targetNames)
+		if spawnPart then
+			toTarget(spawnPart.CFrame * CFrame.new(0, 60, 0))
+		end
+		return
+	end
+	sizepart(target)
+	BringMob(target)
+	toTarget(target.HumanoidRootPart.CFrame * CFrame.new(7, 20, 0))
+	FarmMastery(target)
+	ClickM1(target)
+end
+
 spawn(function()
 	while task.wait() do
-		local ok, err = pcall(function()
+		pcall(function()
 			if AnyFarmMethodEnabled() and StackFarm then
 				FarmMethod()
+			end
+			if Settings["Farm Mastery"] and Settings["Start Farm"] then
+				HauntedCastleMasteryFarm()
 			end
 		end)
 	end
