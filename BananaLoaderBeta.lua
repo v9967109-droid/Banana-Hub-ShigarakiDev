@@ -7288,21 +7288,56 @@ local N = {}
 -- atualizado no mesmo instante em que a interface da missão aparece, então
 -- usamos também os dados da própria quest como fallback.
 local function GetActiveFarmQuestMob(QuestName, QuestId)
+	-- Sempre prioriza a tarefa realmente aceita pelo jogador.
+	-- Isso impede que Bones/Katakuri/Tyrant/Aura ataquem um NPC
+	-- diferente do objetivo atual da quest.
+	local ok, QuestData = pcall(function()
+		return Z and Z.Data and Z.Data.QuestData
+	end)
+	if ok and type(QuestData) == "table" and type(QuestData.Task) == "table" then
+		for MobName, Progress in pairs(QuestData.Task) do
+			if type(MobName) == "string" and MobName ~= "" then
+				local n = tonumber(Progress)
+				if n == nil or n > 0 then
+					return MobName
+				end
+			end
+		end
+	end
+
 	local ActiveMob = GetNameDoubleQuest()
 	if type(ActiveMob) == "string" and ActiveMob ~= "" then
 		return ActiveMob
 	end
 
-	local ok, Task = pcall(function()
+	local ok2, Task = pcall(function()
 		return H[QuestName] and H[QuestName][QuestId] and H[QuestName][QuestId].Task
 	end)
-	if ok and type(Task) == "table" then
+	if ok2 and type(Task) == "table" then
 		for MobName in pairs(Task) do
 			if type(MobName) == "string" and MobName ~= "" then
 				return MobName
 			end
 		end
 	end
+end
+
+local function IsActiveFarmQuestComplete()
+	local ok, Task = pcall(function()
+		return Z and Z.Data and Z.Data.QuestData and Z.Data.QuestData.Task
+	end)
+	if not ok or type(Task) ~= "table" then
+		return false
+	end
+	local found = false
+	for _, Progress in pairs(Task) do
+		found = true
+		local n = tonumber(Progress)
+		if n == nil or n > 0 then
+			return false
+		end
+	end
+	return found
 end
 
 function FarmMethod()
@@ -7330,6 +7365,12 @@ function FarmMethod()
 	f = V or (GetNameDoubleQuest()) or ""
 	local QuestGui = t.PlayerGui.Main:FindFirstChild("Quest")
 	local QuestVisible = QuestGui and QuestGui.Visible
+
+	-- Se a missão atual já terminou, não mantém o alvo antigo.
+	-- Aguarda a interface da quest fechar e o próximo ciclo assume a nova quest.
+	if QuestVisible and IsActiveFarmQuestComplete() then
+		return
+	end
 	if
 		Settings["Auto Quest [Katakuri/Bone/Tyrant]"]
 		and t.Data.Level.Value >= C
@@ -7343,6 +7384,9 @@ function FarmMethod()
 		-- Quando a missão já foi aceita, usa o alvo exato da quest antes da lista
 		-- de mobs do método. Isso evita permanecer parado no NPC após aceitar.
 		local ActiveQuestMob = GetActiveFarmQuestMob(H, J)
+		if QuestVisible and type(ActiveQuestMob) == "string" and ActiveQuestMob ~= "" then
+			f = ActiveQuestMob
+		end
 		-- Depois de aceitar a missão, o alvo passa a ser EXCLUSIVAMENTE o NPC
 		-- definido pela quest ativa. Assim todos os métodos (Level, Bones,
 		-- Katakuri, Tyrant e Aura) seguem a mesma regra e, ao concluir a
@@ -11097,58 +11141,118 @@ local function b()
 	return false
 end
 function RandomFruit()
-	b()
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local LocalPlayer = Players.LocalPlayer
+	local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+	if not CommF or not LocalPlayer then
+		return false
+	end
+
+	-- Evita chamadas repetidas enquanto a janela de giro ainda está aberta.
+	local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	local SpinnerWindow = PlayerGui and PlayerGui:FindFirstChild("SpinnerWindow")
+	if SpinnerWindow and SpinnerWindow.Enabled then
+		return false
+	end
+
+	local ok, result = pcall(function()
+		return CommF:InvokeServer("Cousin", "Buy")
+	end)
+	return ok and result ~= false
 end
-function DetectCountDF()
-	local b = getbackpack()
-	if #b < 1 then
+
+local FruitInfoModule = require(game:GetService("ReplicatedStorage").FruitInfo)
+
+local function GetFruitOriginalName(tool)
+	if not tool or not tool:IsA("Tool") then
+		return nil
+	end
+
+	local original = tool:GetAttribute("OriginalName")
+	if typeof(original) == "string" and original ~= "" then
+		return original
+	end
+
+	local name = tool.Name
+	local clean = string.gsub(name, " Fruit$", "")
+	if clean == "" then
+		return nil
+	end
+
+	-- Formato usado pelo inventário de frutas quando o atributo não existe.
+	return clean .. "-" .. clean
+end
+
+local function IsFruitTool(tool)
+	if not tool or not tool:IsA("Tool") then
+		return false
+	end
+	if tool:FindFirstChild("Ignored") then
+		return false
+	end
+
+	local original = tool:GetAttribute("OriginalName")
+	local name = tool.Name
+	return (typeof(original) == "string" and original ~= "")
+		or string.find(name, "Fruit", 1, true) ~= nil
+end
+
+function StoreFruit(container)
+	if not container or not container.GetChildren then
 		return
 	end
-	local E, l = t.Data.FruitCap.Value, B()
-	for y, P in b, nil, nil do
-		y = P:GetAttribute("OriginalName")
-		for b, b in l, nil, nil do
-			if b.Type == "Blox Fruit" and (b.Name == y and b.Count < E or b.Name ~= y) then
-				return true
-			end
-		end
-	end
-end
-local b = require(game:GetService("ReplicatedStorage").FruitInfo)
-function StoreFruit(E)
-	if not E or not E.GetChildren then
+
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local LocalPlayer = Players.LocalPlayer
+	local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local CommF = Remotes and Remotes:FindFirstChild("CommF_")
+	if not CommF or not LocalPlayer then
 		return
 	end
-	for _, y in ipairs(E:GetChildren()) do
-		if y:IsA("Tool") and string.find(y.Name, "Fruit", 1, true) and not y:FindFirstChild("Ignored") then
-			local cleanName = string.gsub(y.Name, " Fruit", "")
-			local fruitName = y:GetAttribute("OriginalName") or (cleanName .. "-" .. cleanName)
-			local stored = false
-			pcall(function()
-				local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
-				local comm = remotes and remotes:FindFirstChild("CommF_")
-				if comm then
-					comm:InvokeServer("StoreFruit", fruitName, y)
-					stored = true
+
+	for _, tool in ipairs(container:GetChildren()) do
+		if IsFruitTool(tool) then
+			local fruitName = GetFruitOriginalName(tool)
+			if fruitName then
+				local ok = pcall(function()
+					CommF:InvokeServer("StoreFruit", fruitName, tool)
+				end)
+
+				if ok and tool.Parent then
+					local ignored = tool:FindFirstChild("Ignored")
+					if not ignored then
+						ignored = Instance.new("IntValue")
+						ignored.Name = "Ignored"
+						ignored.Parent = tool
+					end
 				end
-			end)
-			if not stored then
-				continue
+
+				if Settings["Webhook Store Fruit"] and Settings["Select Rarity Fruit"] then
+					local rarityName
+					pcall(function()
+						local info = FruitInfoModule.List[fruitName]
+						if info and info.Rarity then
+							rarityName = info.Rarity.Name
+						end
+					end)
+
+					if (rarityName and Settings["Select Rarity Fruit"][rarityName])
+						or SkinFruit[tool.Name] then
+						pcall(function()
+							getgenv().WebhookStoreFruit(tool.Name)
+						end)
+					end
+				end
+
+				task.wait(1)
 			end
-			local ignored = Instance.new("IntValue")
-			ignored.Name = "Ignored"
-			ignored.Parent = y
-			if
-				Settings["Webhook Store Fruit"]
-				and Settings["Select Rarity Fruit"]
-				and (b.List[fruitName] and Settings["Select Rarity Fruit"][b.List[fruitName].Rarity.Name] or SkinFruit[y.Name])
-			then
-				getgenv().WebhookStoreFruit(y.Name)
-			end
-			task.wait(2)
 		end
 	end
 end
+
 function DetectFruitShop()
 	local b, E, l = next, game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("GetFruits", false)
 	for y, y in b, E, l do
