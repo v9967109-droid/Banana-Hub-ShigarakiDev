@@ -7343,14 +7343,12 @@ function FarmMethod()
 		-- Quando a missão já foi aceita, usa o alvo exato da quest antes da lista
 		-- de mobs do método. Isso evita permanecer parado no NPC após aceitar.
 		local ActiveQuestMob = GetActiveFarmQuestMob(H, J)
+		-- Depois de aceitar a missão, o alvo passa a ser EXCLUSIVAMENTE o NPC
+		-- definido pela quest ativa. Assim todos os métodos (Level, Bones,
+		-- Katakuri, Tyrant e Aura) seguem a mesma regra e, ao concluir a
+		-- missão, o fluxo volta automaticamente para TakeQuestLevel().
 		if QuestVisible and typeof(ActiveQuestMob) == "string" and ActiveQuestMob ~= "" then
-			if typeof(V) == "table" then
-				if table.find(V, ActiveQuestMob) then
-					f = ActiveQuestMob
-				end
-			elseif V == ActiveQuestMob then
-				f = ActiveQuestMob
-			end
+			f = ActiveQuestMob
 		end
 		if not Settings["Farm Material"] and Settings["Select Method Farm"] == "Farm Tyrant of the Skies" then
 			if CheckNameBoss("Tyrant of the Skies") then
@@ -12886,10 +12884,6 @@ spawn(function()
 	end
 end)
 LeviathanEventSection = SeaEventTab.CreateSection("Leviathan Event")
-LeviathanEventSection.CreateButton({ Title = "Buy Spy" }, function()
-	local y = require(game.ReplicatedStorage.DialoguesList).Spy
-	require(game.ReplicatedStorage.DialogueController):Start(y)
-end)
 LeviathanEventSection.CreateButton({ Title = "Teleport your boat to current Position" }, function()
 	checkboat().VehicleSeat.CFrame = t.Character.HumanoidRootPart.CFrame
 end)
@@ -12927,7 +12921,9 @@ LeviathanEventSection.CreateToggle(
 LeviathanEventSection.CreateSlider(
 	{ Title = "Distance Auto Buy Boat", Min = 0, Max = 5000, Default = math.min(tonumber(Settings["Distance Auto Buy Boat"]) or 1250, 5000), Precise = true },
 	function(y)
-		SaveSettings("Distance Auto Buy Boat", math.clamp(tonumber(y) or 1250, 0, 5000))
+		local Distance = math.clamp(tonumber(y) or 1250, 0, 5000)
+		Settings["Distance Auto Buy Boat"] = Distance
+		SaveSettings("Distance Auto Buy Boat", Distance)
 	end
 )
 LeviathanEventSection.CreateToggle(
@@ -12941,11 +12937,19 @@ SaveSettings("Distance Auto Buy Boat", math.clamp(tonumber(Settings["Distance Au
 function AutoBuyBoatBeastHunter()
 	if not Settings["Auto Buy Boat Beast Hunter"] or not Settings["Auto Find Leviathan"] then return end
 	local Boats = game:GetService("Workspace"):FindFirstChild("Boats")
+	local BuyDistance = math.clamp(tonumber(Settings["Distance Auto Buy Boat"]) or 1250, 0, 5000)
 	if Boats then
+		local RootForBoat = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
 		for _, Boat in ipairs(Boats:GetChildren()) do
 			if Boat:IsA("Model") and Boat.Name == "Beast Hunter" then
 				local BoatHumanoid = Boat:FindFirstChild("Humanoid")
-				if not BoatHumanoid or BoatHumanoid.Value > 0 then return Boat end
+				local Seat = Boat:FindFirstChild("VehicleSeat")
+				local Alive = not BoatHumanoid or BoatHumanoid.Value > 0
+				local BoatDistance = RootForBoat and Seat and (Seat.Position - RootForBoat.Position).Magnitude or math.huge
+				-- Só reutiliza um Beast Hunter que esteja dentro da distância escolhida.
+				if Alive and BoatDistance <= BuyDistance then
+					return Boat
+				end
 			end
 		end
 	end
@@ -12963,7 +12967,8 @@ function AutoBuyBoatBeastHunter()
 				return
 			end
 		end
-		if BypassTp and type(BypassTp.TweenBypass) == "function" and (BoatShop.Position - Root.Position).Magnitude > (tonumber(Settings["Distance Auto Buy Boat"]) or 1250) then
+		local BuyDistance = math.clamp(tonumber(Settings["Distance Auto Buy Boat"]) or 1250, 0, 5000)
+		if BypassTp and type(BypassTp.TweenBypass) == "function" and (BoatShop.Position - Root.Position).Magnitude > BuyDistance then
 			if BypassTp.TweenBypass(BoatShop) then return end
 		end
 		toTarget(BoatShop)
@@ -13803,6 +13808,24 @@ LeviathanEventSection.CreateToggle(
 		SaveSettings("Use Your Boat Beast Hunter", b)
 	end
 )
+LeviathanEventSection.CreateToggle(
+	{
+		Title = "Auto Fire Shoot Heart Leviathan",
+		Desc = nil,
+		Default = Settings["Auto Fire Shoot Heart Leviathan"] or false,
+	},
+	function(b)
+		SaveSettings("Auto Fire Shoot Heart Leviathan", b)
+		if b then
+			task.spawn(function()
+				while Settings["Auto Fire Shoot Heart Leviathan"] do
+					pcall(AutoFireLeviathanHeart)
+					task.wait(0.15)
+				end
+			end)
+		end
+	end
+)
 function checkboatBeastHunter()
 	local b = Settings["Select Owner Boat Beast Hunter"]
 	b = if Settings["Use Your Boat Beast Hunter"] then t.Name else b
@@ -13932,12 +13955,12 @@ LeviathanEventSection.CreateSlider(
 	{
 		Title = "Speed Boat Auto Drive",
 		Min = 0,
-		Max = 500,
-		Default = Settings["Speed Boat Auto Drive"] or 300,
+		Max = 300,
+		Default = math.min(tonumber(Settings["Speed Boat Auto Drive"]) or 300, 300),
 		Precise = true,
 	},
 	function(b)
-		SaveSettings("Speed Boat Auto Drive", b)
+		SaveSettings("Speed Boat Auto Drive", math.clamp(tonumber(b) or 300, 0, 300))
 	end
 )
 LeviathanEventSection.CreateToggle(
