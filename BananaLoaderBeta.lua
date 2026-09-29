@@ -6561,17 +6561,59 @@ _("Gun", { "Z", "X" })
 _("Blox Fruit", { "Z", "X", "C", "V", "F" })
 FarmMain = Main.CreatePage({ Page_Name = "Farming", Page_Title = "Farming" })
 SettingAutoFarmSection = FarmMain.CreateSection("Setting Farm")
-SettingAutoFarmSection.CreateDropdown(
-	{
-		Title = "Select Method Farm",
-		List = { "Level Farm", "Farm Bones", "Farm Katakuri", "Farm Tyrant of the Skies", "Aura Farm" },
-		Search = false,
-		Selected = false,
-		Default = Settings["Select Method Farm"] or nil,
-	},
-	function(o)
-		SaveSettings("Select Method Farm", o)
+-- Cada método de farm agora possui seu próprio botão.
+-- O Select Method Farm continua apenas como estado interno para manter
+-- compatibilidade com o restante da source.
+local FarmMethodToggles = {
+	Level = "Auto Farm Level",
+	Bones = "Auto Farm Bones",
+	Katakuri = "Auto Farm Katakuri",
+	Tyrant = "Auto Farm Tyrant of the Skies",
+}
+
+local function GetSelectedFarmMethod()
+	if Settings[FarmMethodToggles.Tyrant] then
+		return "Farm Tyrant of the Skies"
+	elseif Settings[FarmMethodToggles.Katakuri] then
+		return "Farm Katakuri"
+	elseif Settings[FarmMethodToggles.Bones] then
+		return "Farm Bones"
+	elseif Settings[FarmMethodToggles.Level] then
+		return "Level Farm"
 	end
+	return nil
+end
+
+local function AnyFarmMethodEnabled()
+	return GetSelectedFarmMethod() ~= nil
+end
+
+local function SetFarmMethodState(methodKey, enabled)
+	SaveSettings(methodKey, enabled)
+	local method = GetSelectedFarmMethod()
+	if method then
+		SaveSettings("Select Method Farm", method)
+		SaveSettings("Start Farm", true)
+	else
+		SaveSettings("Start Farm", false)
+	end
+end
+
+SettingAutoFarmSection.CreateToggle(
+	{ Title = "Auto Farm Level", Desc = "Pega a missão e farma os NPCs da missão automaticamente.", Default = Settings[FarmMethodToggles.Level] or false },
+	function(V) SetFarmMethodState(FarmMethodToggles.Level, V) end
+)
+SettingAutoFarmSection.CreateToggle(
+	{ Title = "Auto Farm Bones", Desc = "Pega a missão e farma somente o objetivo da missão.", Default = Settings[FarmMethodToggles.Bones] or false },
+	function(V) SetFarmMethodState(FarmMethodToggles.Bones, V) end
+)
+SettingAutoFarmSection.CreateToggle(
+	{ Title = "Auto Farm Katakuri", Desc = "Pega a missão e farma somente o objetivo da missão.", Default = Settings[FarmMethodToggles.Katakuri] or false },
+	function(V) SetFarmMethodState(FarmMethodToggles.Katakuri, V) end
+)
+SettingAutoFarmSection.CreateToggle(
+	{ Title = "Auto Farm Tyrant of the Skies", Desc = "Pega a missão e farma somente o objetivo da missão.", Default = Settings[FarmMethodToggles.Tyrant] or false },
+	function(V) SetFarmMethodState(FarmMethodToggles.Tyrant, V) end
 )
 SettingAutoFarmSection.CreateSlider(
 	{
@@ -6608,12 +6650,6 @@ SettingAutoFarmSection.CreateToggle(
 	end
 )
 local o = SettingAutoFarmSection.CreateLabel({ Title = "Accepts automated missions according to Method Farm." })
-SettingAutoFarmSection.CreateToggle(
-	{ Title = "Start Farm", Desc = nil, Default = Settings["Start Farm"] or false },
-	function(V)
-		SaveSettings("Start Farm", V)
-	end
-)
 MasteryFarmSection = FarmMain.CreateSection("Mastery Farm")
 MasteryFarmSection.CreateDropdown(
 	{
@@ -7341,7 +7377,16 @@ local function IsActiveFarmQuestComplete()
 end
 
 function FarmMethod()
-	local f, V, H = Settings["Select Method Farm"]
+	-- O método agora vem diretamente dos toggles individuais.
+	local SelectedFarmMethod = GetSelectedFarmMethod()
+	if SelectedFarmMethod then
+		Settings["Select Method Farm"] = SelectedFarmMethod
+		Settings["Start Farm"] = true
+	else
+		Settings["Start Farm"] = false
+		return
+	end
+	local f, V, H = SelectedFarmMethod
 	local C, J = 9999, 2
 	if f == "Farm Katakuri" then
 		C, V, H = 2275, y, "CakeQuest2"
@@ -7558,8 +7603,8 @@ function FarmMethod()
 end
 spawn(function()
 	while task.wait() do
-		local f, f = pcall(function()
-			if Settings["Start Farm"] and StackFarm then
+		local ok, err = pcall(function()
+			if AnyFarmMethodEnabled() and StackFarm then
 				FarmMethod()
 			end
 		end)
