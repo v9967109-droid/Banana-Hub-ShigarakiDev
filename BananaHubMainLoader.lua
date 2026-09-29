@@ -360,7 +360,8 @@ function AutoFarm()
                                         game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
                                         Click()
                                     end 
-                                until not CheckBoss or not v.Parent or v.Humanoid.Health <= 0 or AutoFarmLevel== True
+AutoFarmLevel = true
+                                until not CheckBoss or not v.Parent or v.Humanoid.Health <= 0 or AutoFarmLevel== false
                                 Usefastattack = false
                                 repeat wait()
                                     a = 2
@@ -464,4 +465,4 @@ function AutoFarm()
                         game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-1405.41956, 29.8519993, 5.62435055, 0.885240912, 3.52892613e-08, 0.465132833, -6.60881128e-09, 1, -6.32913171e-08, -0.465132833, 5.29540891e-08, 0.885240912)
                     end
                 end
-            elseif game.Players.LocalPlayer.Backpack:FindFirstChild("Relic"
+            elseif game.Players.LocalPlayer.Backpack:
