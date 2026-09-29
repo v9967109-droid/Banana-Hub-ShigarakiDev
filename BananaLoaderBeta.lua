@@ -6968,13 +6968,14 @@ function QuestBoneAndkatakuri(V, H)
 	end
 	if (B.Position - C.Position).Magnitude <= 8 then
 		if J.Health > 0 then
-			-- Aguarda 3 segundos quando chegar ao NPC antes de concluir o ciclo
-			-- do Auto Quest. Se sair da área durante a espera, mantém a opção ativa.
+			-- A missão é aceita primeiro. Os 3 segundos começam SOMENTE
+			-- depois da tentativa de aceitar a Quest. O Auto Quest só é
+			-- desligado depois desse atraso, conforme solicitado.
+			CommF:InvokeServer("StartQuest", V, H)
 			task.wait(3)
 			if t.Character and t.Character:FindFirstChild("HumanoidRootPart")
 				and (B.Position - t.Character.HumanoidRootPart.Position).Magnitude <= 12
 				and J.Health > 0 then
-				CommF:InvokeServer("StartQuest", V, H)
 				SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
 				task.wait(0.5)
 			end
