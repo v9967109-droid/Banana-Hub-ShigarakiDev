@@ -360,7 +360,7 @@ function AutoFarm()
                                         game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = v.HumanoidRootPart.CFrame * CFrame.new(0, 30, 0)
                                         Click()
                                     end 
-                                until not CheckBoss or not v.Parent or v.Humanoid.Health <= 0 or AutoFarmLevel== false
+                                until not CheckBoss or not v.Parent or v.Humanoid.Health <= 0 or AutoFarmLevel== True
                                 Usefastattack = false
                                 repeat wait()
                                     a = 2
