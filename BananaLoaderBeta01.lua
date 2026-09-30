@@ -6580,78 +6580,19 @@ local function GetSelectedIndividualFarm()
 	return nil
 end
 
--- Auto Quest is linked to the active quest-based Farm toggle.
--- It is enabled automatically while a quest-based farm is selected, disabled
--- as soon as the quest is accepted, and enabled again after the quest finishes.
-local AutoQuestToggle
-local AutoQuestSyncing = false
-
-local QuestFarmToggleNames = {
-	"Auto Farm Level",
-	"Auto Farm Bones",
-	"Auto Farm Katakuri",
-	"Auto Farm Tyrant of the Skies",
-}
-
-local function IsQuestFarmSelected()
-	for _, name in ipairs(QuestFarmToggleNames) do
-		if Settings[name] then
-			return true
-		end
-	end
-	return false
-end
-
-local function SetAutoQuestState(enabled)
-	enabled = enabled == true
-	local current = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] == true
-	if current == enabled then
-		return
-	end
-
-	SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", enabled)
-
-	-- Keep the actual UI toggle synchronized when the library exposes SetValue.
-	-- AutoQuestSyncing prevents a UI callback from creating a second state change.
-	if AutoQuestToggle and AutoQuestToggle.SetValue then
-		AutoQuestSyncing = true
-		pcall(function()
-			AutoQuestToggle:SetValue(enabled)
-		end)
-		AutoQuestSyncing = false
-	end
-end
-
 local function SetIndividualFarm(name, enabled)
 	SaveSettings(name, enabled)
-
 	if enabled then
 		for _, other in ipairs(FarmToggleNames) do
 			if other ~= name then
 				SaveSettings(other, false)
 			end
 		end
-
-		-- Start Farm Mastery has priority over the normal quest farms.
-		if Settings["Start Farm"] then
-			SaveSettings("Auto Farm Active", false)
-			SetAutoQuestState(false)
-		else
-			SaveSettings("Auto Farm Active", true)
-			if table.find(QuestFarmToggleNames, name) then
-				SetAutoQuestState(true)
-			else
-				SetAutoQuestState(false)
-			end
-		end
+		SaveSettings("Auto Farm Active", true)
 	else
-		local selected = GetSelectedIndividualFarm()
-		SaveSettings("Auto Farm Active", selected ~= nil and not Settings["Start Farm"])
-		if not IsQuestFarmSelected() then
-			SetAutoQuestState(false)
-		end
+		SaveSettings("Auto Farm Active", GetSelectedIndividualFarm() ~= nil)
 	end
-	-- Farm toggles attack only. The Auto Quest controller handles accepting quests.
+	-- Farm toggles only kill mobs. Quests are handled exclusively by the Auto Quest toggle.
 end
 
 SettingAutoFarmSection.CreateToggle({ Title = "Auto Farm Level", Desc = nil, Default = Settings["Auto Farm Level"] or false }, function(v) SetIndividualFarm("Auto Farm Level", v) end)
@@ -6684,15 +6625,10 @@ SettingAutoFarmSection.CreateToggle(
 	end
 )
 local o = SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest only accepts the quest. Farm toggles only kill mobs." })
-AutoQuestToggle = SettingAutoFarmSection.CreateToggle(
-	{ Title = "Auto Quest", Desc = "Automatically accepts the quest for the active Farm and waits for completion before accepting the next one.", Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false },
+getgenv().ToggleAutoQuestFarm = nil
+getgenv().ToggleAutoQuestFarm = SettingAutoFarmSection.CreateToggle(
+	{ Title = "Auto Quest", Desc = "Automatically accepts the quest for the active farm and turns off after the quest is accepted.", Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false },
 	function(V)
-		-- When a quest-based Farm is active, the controller owns this toggle.
-		-- Manual changes are still respected when no quest Farm is running.
-		if AutoQuestSyncing then
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
-			return
-		end
 		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
 	end
 )
@@ -6721,39 +6657,20 @@ MasteryFarmSection.CreateToggle(
 		SaveSettings("Farm Mastery", V)
 		if not V then
 			SaveSettings("Start Farm", false)
-			-- Give control back to the selected normal Farm after Mastery stops.
-			SaveSettings("Auto Farm Active", GetSelectedIndividualFarm() ~= nil)
-			if not IsQuestFarmSelected() then
-				SetAutoQuestState(false)
-			end
 		end
 	end
 )
 MasteryFarmSection.CreateToggle(
 	{ Title = "Start Farm", Desc = "Start Farm Mastery in Haunted Castle only.", Default = Settings["Start Farm"] or false },
 	function(V)
+		-- Start Farm controls the Mastery farm without changing the selected normal farm.
+		SaveSettings("Start Farm", V)
+		SaveSettings("Farm Mastery", V)
+		-- Release the normal-farm controller when Mastery is started.
 		if V then
-			-- Start Farm gets exclusive control. Normal Farm and Auto Quest release control.
-			SaveSettings("Farm Mastery", true)
-			SaveSettings("Start Farm", true)
 			SaveSettings("Auto Farm Active", false)
-			SetAutoQuestState(false)
 		else
-			SaveSettings("Start Farm", false)
-			SaveSettings("Farm Mastery", false)
-			-- Resume the selected normal Farm immediately after Start Farm stops.
-			local selected = GetSelectedIndividualFarm()
-			SaveSettings("Auto Farm Active", selected ~= nil)
-			if selected and IsQuestFarmSelected() then
-				SetAutoQuestState(true)
-			else
-				SetAutoQuestState(false)
-			end
-			pcall(function()
-				if TweenManager and TweenManager.CancelCurrent then
-					TweenManager.CancelCurrent()
-				end
-			end)
+			SaveSettings("Auto Farm Active", GetSelectedIndividualFarm() ~= nil)
 		end
 	end
 )
@@ -7461,11 +7378,6 @@ local SpecialQuestCycleState = {
 }
 
 function FarmMethod()
-	-- Start Farm Mastery must never compete with the normal FarmMethod loop.
-	if Settings["Start Farm"] or not Settings["Auto Farm Active"] then
-		return
-	end
-
 	local selectedToggle = GetSelectedIndividualFarm()
 	if not selectedToggle then
 		return
@@ -7702,57 +7614,74 @@ function FarmMethod()
 		end
 	end
 end
--- Auto Quest controller.
--- Flow:
---   1. A quest-based Farm is enabled -> Auto Quest turns ON.
---   2. The quest becomes visible/accepted -> Auto Quest turns OFF.
---   3. The quest reaches 0/completes or disappears -> Auto Quest turns ON again.
---   4. The next quest is accepted automatically.
--- The controller never attacks mobs; FarmMethod remains responsible for combat.
+-- Auto Quest: ONLY accepts the quest of the selected farm. Never attacks.
 local AutoQuestInfo = {
 	["Auto Farm Bones"] = { 2050, "HauntedQuest2", 2 },
 	["Auto Farm Katakuri"] = { 2275, "CakeQuest2", 2 },
 	["Auto Farm Tyrant of the Skies"] = { 2575, "TikiQuest3", 2 },
 }
 
+local AutoQuestFarmNames = {
+	["Auto Farm Level"] = true,
+	["Auto Farm Bones"] = true,
+	["Auto Farm Katakuri"] = true,
+	["Auto Farm Tyrant of the Skies"] = true,
+}
+
+local function SetAutoQuestFarmToggle(Value)
+	Value = Value == true
+	SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", Value)
+	local Toggle = getgenv().ToggleAutoQuestFarm
+	if Toggle and type(Toggle.SetStage) == "function" then
+		pcall(function()
+			Toggle:SetStage(Value)
+		end)
+	end
+end
+
+-- Auto Quest controller:
+-- 1) detects an active quest farm;
+-- 2) enables Auto Quest only while a new quest is needed;
+-- 3) disables it immediately after a quest becomes active;
+-- 4) enables it again after the quest is completed;
+-- 5) disables it when the farm is stopped.
 spawn(function()
 	while task.wait(0.25) do
 		pcall(function()
-			local selected = GetSelectedIndividualFarm()
-
-			-- Aura Farm and Mastery do not use the normal quest controller.
-			if not selected or not IsQuestFarmSelected() or Settings["Start Farm"] then
-				if Settings["Auto Quest [Katakuri/Bone/Tyrant]"] and not IsQuestFarmSelected() then
-					SetAutoQuestState(false)
-				end
-				return
-			end
-
-			-- Farm Mastery has priority whenever Start Farm is active.
-			if Settings["Farm Mastery"] and Settings["Start Farm"] then
-				SetAutoQuestState(false)
-				return
-			end
-
+			local SelectedFarm = GetSelectedIndividualFarm()
+			local FarmIsActive = AutoQuestFarmNames[SelectedFarm] == true
 			local QuestGui = t.PlayerGui.Main:FindFirstChild("Quest")
-			local QuestVisible = QuestGui and QuestGui.Visible
+			local QuestVisible = QuestGui and QuestGui.Visible == true
 			local QuestComplete = QuestVisible and IsActiveFarmQuestComplete()
+			local NeedNewQuest = FarmIsActive and (not QuestVisible or QuestComplete)
 
-			-- Mission accepted/in progress: Auto Quest must turn itself OFF.
-			if QuestVisible and not QuestComplete then
-				SetAutoQuestState(false)
+			-- Farm Mastery/Start Farm does not use this quest controller.
+			if Settings["Farm Mastery"] and Settings["Start Farm"] then
+				SetAutoQuestFarmToggle(false)
 				return
 			end
 
-			-- No active mission, or the previous mission has completed:
-			-- turn Auto Quest back ON and accept the correct quest.
-			SetAutoQuestState(true)
+			if not FarmIsActive then
+				SetAutoQuestFarmToggle(false)
+				return
+			end
 
-			local info = AutoQuestInfo[selected]
-			if info and t.Data.Level.Value >= info[1] then
-				QuestBoneAndkatakuri(info[2], info[3])
-			elseif selected == "Auto Farm Level" then
-				TakeQuestLevel()
+			if QuestVisible and not QuestComplete then
+				-- Quest accepted: stop Auto Quest and let the farm attack the target.
+				SetAutoQuestFarmToggle(false)
+				return
+			end
+
+			-- No active quest, or the previous quest is complete: enable it again.
+			if NeedNewQuest then
+				SetAutoQuestFarmToggle(true)
+				local sel = SelectedFarm
+				local info = sel and AutoQuestInfo[sel]
+				if info and t.Data.Level.Value >= info[1] then
+					QuestBoneAndkatakuri(info[2], info[3])
+				elseif sel == "Auto Farm Level" then
+					TakeQuestLevel()
+				end
 			end
 		end)
 	end
@@ -7793,7 +7722,7 @@ spawn(function()
 		pcall(function()
 			if Settings["Farm Mastery"] and Settings["Start Farm"] then
 				HauntedCastleMasteryFarm()
-			elseif Settings["Auto Farm Active"] and not Settings["Start Farm"] and GetSelectedIndividualFarm() and StackFarm then
+			elseif GetSelectedIndividualFarm() and StackFarm then
 				FarmMethod()
 			end
 		end)
