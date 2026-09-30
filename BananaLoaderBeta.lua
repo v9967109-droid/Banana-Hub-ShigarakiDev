@@ -134,9 +134,6 @@ function ForceResetSchema(l, Q)
 end
 
 
-if getgenv().__BF_LOADED and getgenv().__BF_VERSION == "Beta-1-fixed" then
-	return getgenv().__BF_RESULT
-end
 
 Settings = {}
 HttpService = game:GetService("HttpService")
@@ -291,9 +288,6 @@ getgenv().ExploitReq = (syn and syn.request)
 	or (http_request)
 	or (http and http.request)
 	or (requests)
-if getgenv().LoadScript and getgenv().__BF_VERSION == "Beta-1-fixed" then
-	return
-end
 getgenv().CheckPlaceId = game.PlaceId == 100117331123089 and 100117331123089 or 7449423635
 getgenv().CheckPlaceId2 = game.PlaceId == 4442272183 and 4442272183 or 79091703265657
 getgenv().CheckPlaceId3 = game.PlaceId == 2753915549 and 2753915549 or 85211729168715
@@ -1732,22 +1726,44 @@ game:GetService("Players").LocalPlayer.Idled:connect(function()
 	wait(1)
 	vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
 end)
-local __bananaHttpGet = game.HttpGet or function(self, url)
-	return game:HttpGet(url)
-end
 local __bananaLibraryUrl = "https://raw.githubusercontent.com/obiiyeuem/vthangsitink/refs/heads/main/zzzz.lua"
-local __bananaLibrarySource
-local __bananaLibraryOk, __bananaLibraryErr = pcall(function()
-	__bananaLibrarySource = __bananaHttpGet(game, __bananaLibraryUrl)
-end)
-if not __bananaLibraryOk or type(__bananaLibrarySource) ~= "string" or #__bananaLibrarySource == 0 then
-	error("Banana Cat Hub: falha ao carregar a biblioteca da interface. " .. tostring(__bananaLibraryErr))
+local __bananaLibrarySource, __bananaLibraryErr
+local __bananaHttpMethods = {
+	function() return game:HttpGet(__bananaLibraryUrl) end,
+	function() return game.HttpGet(game, __bananaLibraryUrl) end,
+}
+if type(request) == "function" then
+	table.insert(__bananaHttpMethods, 1, function()
+		local r = request({Url = __bananaLibraryUrl, Method = "GET"})
+		return r and (r.Body or r.body)
+	end)
 end
-local __bananaCompile = loadstring(__bananaLibrarySource)
+if type(http_request) == "function" then
+	table.insert(__bananaHttpMethods, 1, function()
+		local r = http_request({Url = __bananaLibraryUrl, Method = "GET"})
+		return r and (r.Body or r.body)
+	end)
+end
+for _, __bananaGet in ipairs(__bananaHttpMethods) do
+	local __ok, __result = pcall(__bananaGet)
+	if __ok and type(__result) == "string" and #__result > 0 then
+		__bananaLibrarySource = __result
+		break
+	end
+	__bananaLibraryErr = __result
+end
+if type(__bananaLibrarySource) ~= "string" or #__bananaLibrarySource == 0 then
+	error("Banana Cat Hub: não foi possível carregar a biblioteca da interface. " .. tostring(__bananaLibraryErr))
+end
+local __bananaCompile = loadstring or load
 if type(__bananaCompile) ~= "function" then
-	error("Banana Cat Hub: o executor não conseguiu compilar a biblioteca da interface.")
+	error("Banana Cat Hub: este executor não oferece um compilador Lua/Luau.")
 end
-local __bananaLibraryRunOk, A = pcall(__bananaCompile)
+local __bananaCompileOk, __bananaChunk = pcall(__bananaCompile, __bananaLibrarySource, "BananaCatHubUI")
+if not __bananaCompileOk or type(__bananaChunk) ~= "function" then
+	error("Banana Cat Hub: erro ao compilar a biblioteca da interface. " .. tostring(__bananaChunk))
+end
+local __bananaLibraryRunOk, A = pcall(__bananaChunk)
 if not __bananaLibraryRunOk or type(A) ~= "table" then
 	error("Banana Cat Hub: erro ao iniciar a biblioteca da interface. " .. tostring(A))
 end
@@ -6921,6 +6937,166 @@ TakeQuestLevel = function()
 	else
 		toTarget(CFrame.new(H) * CFrame.new(0, 4, 2), true)
 	end
+end
+
+-- PASS26: level-farm quest controller restored/normalized.
+-- Keeps AutoFarmLevel disabled by default while restoring the original
+-- quest acquisition/reconciliation flow used by StartFarm.
+GetBestNPC = function(level)
+    level = tonumber(level) or 1
+    if type(B) == "function" then
+        local ok, result = pcall(B, level)
+        if ok and type(result) == "table" and result.Pos then
+            return result
+        end
+    end
+    return nil
+end
+
+LevelFarmController = LevelFarmController or {}
+LevelFarmController.NextQuestRequestAt = LevelFarmController.NextQuestRequestAt or 0
+LevelFarmController.PendingMob = LevelFarmController.PendingMob
+LevelFarmController.PendingQuestName = LevelFarmController.PendingQuestName
+LevelFarmController.PendingQuestId = LevelFarmController.PendingQuestId
+LevelFarmController.PendingUntil = LevelFarmController.PendingUntil or 0
+LevelFarmController.LastQuestAction = LevelFarmController.LastQuestAction
+LevelFarmController.LastQuestResponse = LevelFarmController.LastQuestResponse
+
+local function __BananaCurrentQuestMob()
+    if not DontQuest() then
+        return nil
+    end
+    local data = Z and Z.Data and Z.Data.QuestData
+    local taskData = data and data.Task
+    if type(taskData) ~= "table" then
+        return nil
+    end
+    for mobName in pairs(taskData) do
+        return tostring(mobName)
+    end
+    return nil
+end
+
+local function __BananaQuestNameMatches(currentName, expectedName)
+    if not currentName or not expectedName then
+        return false
+    end
+    currentName = tostring(currentName)
+    expectedName = tostring(expectedName)
+    if currentName == expectedName then
+        return true
+    end
+    return string.find(currentName, expectedName, 1, true) ~= nil
+        or string.find(expectedName, currentName, 1, true) ~= nil
+end
+
+function LevelFarmController.GetPendingMob(questInfo)
+    local currentMob = __BananaCurrentQuestMob()
+    if currentMob then
+        LevelFarmController.PendingMob = currentMob
+        if questInfo and questInfo.Mob and not __BananaQuestNameMatches(currentMob, questInfo.Mob) then
+            return nil
+        end
+        return currentMob
+    end
+
+    if LevelFarmController.PendingMob and tick() <= (LevelFarmController.PendingUntil or 0) then
+        return LevelFarmController.PendingMob
+    end
+    return nil
+end
+
+function LevelFarmController.ReconcileQuest(questInfo)
+    if not DontQuest() then
+        return false
+    end
+
+    local currentMob = __BananaCurrentQuestMob()
+    local expectedMob = questInfo and questInfo.Mob
+    if not expectedMob or __BananaQuestNameMatches(currentMob, expectedMob) then
+        return false
+    end
+
+    local now = tick()
+    if now < (LevelFarmController.NextQuestRequestAt or 0) then
+        return true
+    end
+
+    LevelFarmController.NextQuestRequestAt = now + 1.25
+    pcall(function()
+        CommF:InvokeServer("AbandonQuest")
+    end)
+    LevelFarmController.PendingMob = nil
+    LevelFarmController.PendingQuestName = nil
+    LevelFarmController.PendingQuestId = nil
+    LevelFarmController.PendingUntil = 0
+    return true
+end
+
+function LevelFarmController.GetQuestForGroup(groupName, level)
+    level = tonumber(level) or 1
+    local candidate = GetBestNPC(level)
+    if candidate then
+        return candidate
+    end
+    return nil
+end
+
+function LevelFarmController.StartBestQuest()
+    if DontQuest() then
+        return false, "quest-active"
+    end
+
+    local questInfo = GetBestNPC(t.Data.Level.Value)
+    if not questInfo or not questInfo.Pos then
+        return false, "no-quest"
+    end
+
+    local root = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+    local humanoid = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
+    if not root or not humanoid or humanoid.Health <= 0 then
+        return false, "character-unavailable"
+    end
+
+    local pos = typeof(questInfo.Pos) == "CFrame" and questInfo.Pos.Position or questInfo.Pos
+    if (pos - root.Position).Magnitude > 8 then
+        toTarget(CFrame.new(pos) * CFrame.new(0, 4, 2), true)
+        return false, "moving"
+    end
+
+    local now = tick()
+    if now < (LevelFarmController.NextQuestRequestAt or 0) then
+        return false, "debounce"
+    end
+
+    LevelFarmController.NextQuestRequestAt = now + 1.25
+    local ok, response = pcall(function()
+        return CommF:InvokeServer("StartQuest", tostring(questInfo.QuestName), questInfo.Id)
+    end)
+
+    LevelFarmController.LastQuestAction = ok and "start" or "start-error"
+    LevelFarmController.LastQuestResponse = response
+
+    if ok and (response == 0 or response == true) then
+        LevelFarmController.PendingMob = questInfo.Mob
+        LevelFarmController.PendingQuestName = questInfo.QuestName
+        LevelFarmController.PendingQuestId = questInfo.Id
+        LevelFarmController.PendingUntil = tick() + 4
+        return true, response
+    end
+
+    return false, response
+end
+
+-- Make the legacy quest entry point use the same controller.
+TakeQuestLevel = function()
+    local ok = LevelFarmController.StartBestQuest()
+    if ok then
+        local timeout = tick() + 4
+        repeat
+            task.wait(0.1)
+        until DontQuest() or tick() > timeout
+    end
 end
 
 function DetectPartSpawnMob(V, H)
