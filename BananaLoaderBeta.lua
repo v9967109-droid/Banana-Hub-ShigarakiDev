@@ -6601,10 +6601,18 @@ local function SetAutoQuestToggleState(enabled)
 		local option = Options and Options["Auto Quest [Katakuri/Bone/Tyrant]"]
 		local control = option and option.FunctionCreate
 		if control then
+			-- A API da UI usa SetValue como função armazenada no controle.
+			-- Chamar com ponto evita passar o controle como argumento extra e
+			-- mantém a própria toggle sincronizada com Settings.
 			if control.SetValue then
-				control:SetValue(enabled)
+				local ok = pcall(function()
+					control.SetValue(enabled)
+				end)
+				if not ok and control.SetStage then
+					pcall(function() control.SetStage(enabled) end)
+				end
 			elseif control.SetStage then
-				control:SetStage(enabled)
+				pcall(function() control.SetStage(enabled) end)
 			end
 		end
 	end)
