@@ -6626,11 +6626,33 @@ SettingAutoFarmSection.CreateToggle(
 )
 local o = SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest only accepts the quest. Farm toggles only kill mobs." })
 SettingAutoFarmSection.CreateToggle(
-	{ Title = "Auto Quest", Desc = "Only accepts the quest of the selected farm (Level/Bones/Katakuri/Tyrant).", Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false },
+	{ Title = "Auto Quest", Desc = "Automatic: turns ON by itself when a Farm is active and there is no quest, turns OFF when the quest is accepted, turns ON again when it is completed.", Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false },
 	function(V)
+		-- Mudança automática (feita pelo gerenciador): só atualiza o valor,
+		-- sem SaveSettings(false) para não cancelar o tween do farm.
+		if (getgenv().__AutoQuestInternalUntil or 0) > tick() then
+			Settings["Auto Quest [Katakuri/Bone/Tyrant]"] = V
+			return
+		end
 		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
 	end
 )
+-- Mantém os toggles "Farm Mastery" e "Start Farm" visualmente iguais ao estado real.
+function SyncMasteryToggle(title, v)
+	if getgenv().__MasterySyncing then
+		return
+	end
+	getgenv().__MasterySyncing = true
+	pcall(function()
+		local opt = Options and Options[title]
+		if opt and opt.FunctionCreate and opt.FunctionCreate.SetValue then
+			opt.FunctionCreate:SetValue(v)
+		end
+	end)
+	task.delay(0.3, function()
+		getgenv().__MasterySyncing = false
+	end)
+end
 MasteryFarmSection = FarmMain.CreateSection("Mastery Farm")
 MasteryFarmSection.CreateDropdown(
 	{
@@ -6656,6 +6678,9 @@ MasteryFarmSection.CreateToggle(
 		SaveSettings("Farm Mastery", V)
 		if not V then
 			SaveSettings("Start Farm", false)
+			-- Devolve o controle ao farm normal (antes ficava parado).
+			SaveSettings("Auto Farm Active", GetSelectedIndividualFarm() ~= nil)
+			SyncMasteryToggle("Start Farm", false)
 		end
 	end
 )
@@ -6665,6 +6690,9 @@ MasteryFarmSection.CreateToggle(
 		-- Start Farm is the only switch that activates Farm Mastery.
 		SaveSettings("Farm Mastery", V)
 		SaveSettings("Start Farm", V)
+		-- Stops the running farm loops so they release control to Mastery.
+		SaveSettings("Auto Farm Active", (not V) and GetSelectedIndividualFarm() ~= nil)
+		SyncMasteryToggle("Farm Mastery", V)
 	end
 )
 FarmingMaterialSection = FarmMain.CreateSection("Farming Material")
@@ -7411,7 +7439,16 @@ function FarmMethod()
 
 	-- Se a missão atual já terminou, não mantém o alvo antigo.
 	-- Aguarda a interface da quest fechar e o próximo ciclo assume a nova quest.
-	if QuestVisible and Settings["Auto Quest [Katakuri/Bone/Tyrant]"] and IsActiveFarmQuestComplete() then
+	-- Auto Quest owns the character only while there is no active quest
+	-- (or the current one is finished). Otherwise both loops would fight
+	-- over the teleport and the character stays stuck at the NPC.
+	if
+		Settings["Auto Quest [Katakuri/Bone/Tyrant]"]
+		and SelectedFarmMethod ~= "Aura Farm"
+		and not Settings["Farm Material"]
+		and (SelectedFarmMethod == "Level Farm" or t.Data.Level.Value >= C)
+		and (not QuestVisible or IsActiveFarmQuestComplete())
+	then
 		return
 	end
 	-- Without an active quest the farm still targets the method's mobs
@@ -7614,7 +7651,7 @@ spawn(function()
 				return
 			end
 			local QuestGui = t.PlayerGui.Main:FindFirstChild("Quest")
-			if QuestGui and QuestGui.Visible then
+			if QuestGui and QuestGui.Visible and not IsActiveFarmQuestComplete() then
 				return
 			end
 			local sel = GetSelectedIndividualFarm()
@@ -7624,6 +7661,41 @@ spawn(function()
 			elseif sel == "Auto Farm Level" then
 				TakeQuestLevel()
 			end
+		end)
+	end
+end)
+
+-- Auto Quest automático: liga quando há Farm ativo sem missão, desliga ao aceitar,
+-- liga de novo quando a missão é concluída, e desliga quando nenhum Farm está ativo.
+spawn(function()
+	-- locals dentro da função para não consumir o limite de locals do chunk principal
+	local AQ_KEY = "Auto Quest [Katakuri/Bone/Tyrant]"
+	local function SetAutoQuest(v)
+		v = v and true or false
+		if Settings[AQ_KEY] == v then
+			return
+		end
+		getgenv().__AutoQuestInternalUntil = tick() + 0.5
+		Settings[AQ_KEY] = v
+		pcall(function()
+			local opt = Options and Options["Auto Quest"]
+			if opt and opt.FunctionCreate and opt.FunctionCreate.SetValue then
+				opt.FunctionCreate:SetValue(v)
+			end
+		end)
+	end
+	while task.wait(0.25) do
+		pcall(function()
+			local sel = GetSelectedIndividualFarm()
+			local masteryOn = Settings["Farm Mastery"] and Settings["Start Farm"]
+			local needsQuest = sel ~= nil and sel ~= "Aura Farm" and not masteryOn and not Settings["Farm Material"]
+			if not needsQuest then
+				SetAutoQuest(false)
+				return
+			end
+			local QuestGui = t.PlayerGui.Main:FindFirstChild("Quest")
+			local questActive = QuestGui and QuestGui.Visible and not IsActiveFarmQuestComplete()
+			SetAutoQuest(not questActive)
 		end)
 	end
 end)
@@ -7641,10 +7713,20 @@ local function HauntedCastleMasteryFarm()
 		"Demonic Soul",
 		"Living Zombie",
 		"Possessed Mummy",
+		"Posessed Mummy",
 	}
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
 	local mob = DetectMob(masteryMobs)
-	if mob then
+	if mob and mob:FindFirstChild("HumanoidRootPart") then
 		sizepart(mob)
+		pcall(BringMob, mob)
+		-- Antes o personagem não se aproximava do mob e ficava parado.
+		if Settings["Select Method Farm Mastery"] == "Blox Fruit" then
+			toTarget(mob.HumanoidRootPart.CFrame * CFrame.new(-7, getgenv().YPosFruit or 20, 0))
+		else
+			toTarget(mob.HumanoidRootPart.CFrame * CFrame.new(7, 20, 0))
+		end
 		FarmMastery(mob)
 		ClickM1(mob)
 		return
