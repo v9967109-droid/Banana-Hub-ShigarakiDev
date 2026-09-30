@@ -6589,15 +6589,10 @@ local function SetIndividualFarm(name, enabled)
 			end
 		end
 		SaveSettings("Auto Farm Active", true)
-
-		-- Auto Quest is never enabled by itself. It is enabled only after
-		-- the user turns on an individual farm method.
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
 	else
 		SaveSettings("Auto Farm Active", GetSelectedIndividualFarm() ~= nil)
-		-- Turning the farm off also stops the automatic quest cycle.
-		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
 	end
+	-- Farm toggles only kill mobs. Quests are handled exclusively by the Auto Quest toggle.
 end
 
 SettingAutoFarmSection.CreateToggle({ Title = "Auto Farm Level", Desc = nil, Default = Settings["Auto Farm Level"] or false }, function(v) SetIndividualFarm("Auto Farm Level", v) end)
@@ -6629,17 +6624,11 @@ SettingAutoFarmSection.CreateToggle(
 		SaveSettings("Hop Find Katakuri", o)
 	end
 )
-local o = SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest is managed automatically for Katakuri, Bones and Tyrant." })
+local o = SettingAutoFarmSection.CreateLabel({ Title = "Auto Quest only accepts the quest. Farm toggles only kill mobs." })
 SettingAutoFarmSection.CreateToggle(
-	{ Title = "Auto Quest", Desc = "Automatically request the selected farm quest.", Default = false },
+	{ Title = "Auto Quest", Desc = "Only accepts the quest of the selected farm (Level/Bones/Katakuri/Tyrant).", Default = Settings["Auto Quest [Katakuri/Bone/Tyrant]"] or false },
 	function(V)
-		-- Manual Auto Quest is allowed only while a farm method is active.
-		-- Otherwise the toggle immediately returns to OFF.
-		if GetSelectedIndividualFarm() ~= nil then
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
-		else
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
-		end
+		SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", V)
 	end
 )
 MasteryFarmSection = FarmMain.CreateSection("Mastery Farm")
@@ -6673,7 +6662,9 @@ MasteryFarmSection.CreateToggle(
 MasteryFarmSection.CreateToggle(
 	{ Title = "Start Farm", Desc = "Start Farm Mastery in Haunted Castle only.", Default = Settings["Start Farm"] or false },
 	function(V)
-		SaveSettings("Start Farm", V and Settings["Farm Mastery"] == true)
+		-- Start Farm is the only switch that activates Farm Mastery.
+		SaveSettings("Farm Mastery", V)
+		SaveSettings("Start Farm", V)
 	end
 )
 FarmingMaterialSection = FarmMain.CreateSection("Farming Material")
@@ -6859,6 +6850,7 @@ local function B(C)
 	return c
 end
 
+GetLevelQuestInfo = B
 TakeQuestLevel = function()
 	local V = B(t.Data.Level.Value)
 	if not V or not V.Pos then
@@ -7417,36 +7409,20 @@ function FarmMethod()
 	local QuestVisible = QuestGui and QuestGui.Visible
 	local IsSpecialFarm = SelectedFarmMethod == "Farm Katakuri" or SelectedFarmMethod == "Farm Bones" or SelectedFarmMethod == "Farm Tyrant of the Skies"
 
-	-- Auto Quest funciona em ciclos: ativa para procurar a missão,
-	-- desativa assim que a missão é aceita e volta a ativar somente
-	-- depois que a missão anterior terminou.
-	if IsSpecialFarm then
-		if QuestVisible then
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", false)
-			SpecialQuestCycleState.lastQuestVisible = true
-		elseif SpecialQuestCycleState.lastQuestVisible then
-			SpecialQuestCycleState.lastQuestVisible = false
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
-		else
-			SaveSettings("Auto Quest [Katakuri/Bone/Tyrant]", true)
-		end
-	end
-
 	-- Se a missão atual já terminou, não mantém o alvo antigo.
 	-- Aguarda a interface da quest fechar e o próximo ciclo assume a nova quest.
-	if QuestVisible and IsActiveFarmQuestComplete() then
+	if QuestVisible and Settings["Auto Quest [Katakuri/Bone/Tyrant]"] and IsActiveFarmQuestComplete() then
 		return
 	end
-	if
-		Settings["Auto Quest [Katakuri/Bone/Tyrant]"]
-		and t.Data.Level.Value >= C
-		and not QuestVisible
-	then
-		QuestBoneAndkatakuri(H, J)
-		return
-	elseif not QuestVisible and typeof(f) == "string" then
-		TakeQuestLevel()
-	else
+	-- Without an active quest the farm still targets the method's mobs
+	-- (Level Farm: mob of the current level quest).
+	if SelectedFarmMethod == "Level Farm" and not QuestVisible and not Settings["Farm Material"] then
+		local okL, info = pcall(GetLevelQuestInfo, t.Data.Level.Value)
+		if okL and type(info) == "table" and info.Mob then
+			f = info.Mob
+		end
+	end
+	do
 		-- Quando a missão já foi aceita, usa o alvo exato da quest antes da lista
 		-- de mobs do método. Isso evita permanecer parado no NPC após aceitar.
 		local ActiveQuestMob = GetActiveFarmQuestMob(H, J)
@@ -7603,7 +7579,7 @@ function FarmMethod()
 				task.wait()
 				sizepart(V)
 				BringMob(V)
-				FarmMastery(V)
+				UsedualFlock()
 				ClickM1(V)
 				if
 					game:GetService("Players").LocalPlayer.PlayerGui.TransformationHUD.ImageLabel.Visible
@@ -7622,6 +7598,36 @@ function FarmMethod()
 		end
 	end
 end
+-- Auto Quest: ONLY accepts the quest of the selected farm. Never attacks.
+local AutoQuestInfo = {
+	["Auto Farm Bones"] = { 2050, "HauntedQuest2", 2 },
+	["Auto Farm Katakuri"] = { 2275, "CakeQuest2", 2 },
+	["Auto Farm Tyrant of the Skies"] = { 2575, "TikiQuest3", 2 },
+}
+spawn(function()
+	while task.wait(0.3) do
+		pcall(function()
+			if not Settings["Auto Quest [Katakuri/Bone/Tyrant]"] then
+				return
+			end
+			if Settings["Farm Mastery"] and Settings["Start Farm"] then
+				return
+			end
+			local QuestGui = t.PlayerGui.Main:FindFirstChild("Quest")
+			if QuestGui and QuestGui.Visible then
+				return
+			end
+			local sel = GetSelectedIndividualFarm()
+			local info = sel and AutoQuestInfo[sel]
+			if info and t.Data.Level.Value >= info[1] then
+				QuestBoneAndkatakuri(info[2], info[3])
+			elseif sel == "Auto Farm Level" then
+				TakeQuestLevel()
+			end
+		end)
+	end
+end)
+
 local function HauntedCastleMasteryFarm()
 	if not Settings["Farm Mastery"] or not Settings["Start Farm"] then
 		return
