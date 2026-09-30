@@ -7623,7 +7623,7 @@ function FarmMethod()
 	end
 end
 local function HauntedCastleMasteryFarm()
-	if not Settings["Farm Mastery"] or not Settings["Start Farm"] or not StackFarm then
+	if not Settings["Farm Mastery"] or not Settings["Start Farm"] then
 		return
 	end
 	local character = t.Character
@@ -7654,10 +7654,10 @@ end
 spawn(function()
 	while task.wait() do
 		pcall(function()
-			if GetSelectedIndividualFarm() and StackFarm then
-				FarmMethod()
-			elseif Settings["Farm Mastery"] and Settings["Start Farm"] and StackFarm then
+			if Settings["Farm Mastery"] and Settings["Start Farm"] then
 				HauntedCastleMasteryFarm()
+			elseif GetSelectedIndividualFarm() and StackFarm then
+				FarmMethod()
 			end
 		end)
 	end
