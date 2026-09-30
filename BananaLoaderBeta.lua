@@ -1,4 +1,4 @@
-AutoFarmLevel = true
+AutoFarmLevel = false
 
 function BuildSchema()
 	local m, E = {}, 1
@@ -134,7 +134,7 @@ function ForceResetSchema(l, Q)
 end
 
 
-if getgenv().__BF_LOADED then
+if getgenv().__BF_LOADED and getgenv().__BF_VERSION == "Beta-1-fixed" then
 	return getgenv().__BF_RESULT
 end
 
@@ -281,12 +281,17 @@ until game:IsLoaded() and game.Players.LocalPlayer
 repeat
 	wait()
 until game:FindFirstChild("CoreGui")
-getgenv().ExploitReq = syn and syn.request
-	or identifyexecutor() == "Fluxus" and request
-	or http_request
-	or http.request
-	or requests
-if getgenv().LoadScript then
+local __bananaIdentifyExecutor = identifyexecutor
+local __bananaExecutorName = ""
+if type(__bananaIdentifyExecutor) == "function" then
+	pcall(function() __bananaExecutorName = tostring(__bananaIdentifyExecutor()) end)
+end
+getgenv().ExploitReq = (syn and syn.request)
+	or (request)
+	or (http_request)
+	or (http and http.request)
+	or (requests)
+if getgenv().LoadScript and getgenv().__BF_VERSION == "Beta-1-fixed" then
 	return
 end
 getgenv().CheckPlaceId = game.PlaceId == 100117331123089 and 100117331123089 or 7449423635
@@ -1716,7 +1721,6 @@ function CheckQuest()
 	end
 end
 
-getgenv().LoadScript = true
 local t = game.Players.LocalPlayer
 getgenv().getupvalue = debug.getupvalue
 getgenv().getupvalues = debug.getupvalues
@@ -1728,8 +1732,26 @@ game:GetService("Players").LocalPlayer.Idled:connect(function()
 	wait(1)
 	vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
 end)
-local A =
-	loadstring(game:HttpGet("https://raw.githubusercontent.com/obiiyeuem/vthangsitink/refs/heads/main/zzzz.lua"))()
+local __bananaHttpGet = game.HttpGet or function(self, url)
+	return game:HttpGet(url)
+end
+local __bananaLibraryUrl = "https://raw.githubusercontent.com/obiiyeuem/vthangsitink/refs/heads/main/zzzz.lua"
+local __bananaLibrarySource
+local __bananaLibraryOk, __bananaLibraryErr = pcall(function()
+	__bananaLibrarySource = __bananaHttpGet(game, __bananaLibraryUrl)
+end)
+if not __bananaLibraryOk or type(__bananaLibrarySource) ~= "string" or #__bananaLibrarySource == 0 then
+	error("Banana Cat Hub: falha ao carregar a biblioteca da interface. " .. tostring(__bananaLibraryErr))
+end
+local __bananaCompile = loadstring(__bananaLibrarySource)
+if type(__bananaCompile) ~= "function" then
+	error("Banana Cat Hub: o executor não conseguiu compilar a biblioteca da interface.")
+end
+local __bananaLibraryRunOk, A = pcall(__bananaCompile)
+if not __bananaLibraryRunOk or type(A) ~= "table" then
+	error("Banana Cat Hub: erro ao iniciar a biblioteca da interface. " .. tostring(A))
+end
+getgenv().LoadScript = true
 Main = A.CreateMain({ Title = "Banana Cat Hub \ By Shigaraki [Beta]", Desc = "By Shigaraki [Beta]" })
 
 PageShop = Main.CreatePage({ Page_Name = "Shop", Page_Title = "Shop" })
@@ -7625,47 +7647,77 @@ function FarmMethod()
 		end
 end
 local function AutoQuestSpecialFarmController()
-	-- Auto Quest is the only system allowed to acquire/renew the special quests.
-	-- Farm methods only consume the active quest target.
+	-- Auto Quest e o unico responsavel por obter/renovar as missoes especiais.
 	if not AnyFarmMethodEnabled() then
 		SetAutoQuestSpecialState(false)
 		return
 	end
-	local questGui = t.PlayerGui.Main:FindFirstChild("Quest")
+
+	local playerGui = t:FindFirstChild("PlayerGui")
+	local mainGui = playerGui and playerGui:FindFirstChild("Main")
+	local questGui = mainGui and mainGui:FindFirstChild("Quest")
 	local questVisible = questGui and questGui.Visible
+
+	-- Se a Quest ja foi aceita, desliga a Toggle real do Auto Quest.
 	if questVisible then
-		-- Quest already accepted: Auto Quest stays off while the Farm works.
 		SetAutoQuestSpecialState(false)
 		return
 	end
-	-- No active quest: re-enable Auto Quest and let this controller obtain it.
-	SetAutoQuestSpecialState(true)
+
 	local method = GetSelectedFarmMethod()
 	if not method then
+		SetAutoQuestSpecialState(false)
 		return
 	end
+
+	SetAutoQuestSpecialState(true)
+
+	local questName, questId
 	if method == "Level Farm" then
 		TakeQuestLevel()
 		return
-	end
-	local questId, minLevel
-	if method == "Farm Katakuri" then
-		questId = "CakeQuest2"
-		minLevel = 2275
+	elseif method == "Farm Katakuri" then
+		questName, questId = "CakeQuest2", 2
 	elseif method == "Farm Bones" then
-		questId = "HauntedQuest2"
-		minLevel = 2050
+		questName = "HauntedQuest2"
+		local level = t.Data and t.Data:FindFirstChild("Level") and t.Data.Level.Value or 0
+		questId = (level >= 2050) and 2 or 1
 	elseif method == "Farm Tyrant of the Skies" then
-		questId = "TikiQuest3"
-		minLevel = 2575
-	end
-	if not questId or not minLevel or not t.Data or not t.Data:FindFirstChild("Level") or t.Data.Level.Value < minLevel then
+		questName, questId = "TikiQuest3", 2
+	else
 		return
 	end
-	local questInfo = LevelFarmController.GetQuestForGroup(questId, t.Data.Level.Value)
-	if questInfo and questInfo.Id and questInfo.Level then
-		-- Only Auto Quest calls the quest helper. FarmMethod never starts quests.
-		QuestBoneAndkatakuri(questId, questInfo.Id)
+
+	local point = getgenv().questpoint and getgenv().questpoint[questName]
+	if not point then
+		CFrameQuest()
+		point = getgenv().questpoint and getgenv().questpoint[questName]
+	end
+	if not point then return end
+
+	local root = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+	local humanoid = t.Character and t.Character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 then return end
+
+	if (point.Position - root.Position).Magnitude > 8 then
+		toTarget(point * CFrame.new(0, 4, 2), true)
+		return
+	end
+
+	if not (questGui and questGui.Visible) then
+		local ok, response = pcall(function()
+			return CommF:InvokeServer("StartQuest", questName, questId)
+		end)
+		if ok and (response == 0 or response == true) then
+			for _ = 1, 10 do
+				task.wait(0.1)
+				questVisible = questGui and questGui.Visible
+				if questVisible then
+					SetAutoQuestSpecialState(false)
+					return
+				end
+			end
+		end
 	end
 end
 
@@ -22040,6 +22092,7 @@ BananaCatBF.CheckQuest = CheckQuest
 getgenv().CheckQuest = CheckQuest
 
 getgenv().__BF_LOADED = true
+getgenv().__BF_VERSION = "Beta-1-fixed"
 
 
 
